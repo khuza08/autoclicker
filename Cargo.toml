@@ -1,0 +1,24 @@
+[package]
+name = "autoclicker-rust"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "autoclicker"
+path = "src/main.rs"
+
+[lib]
+name = "autoclicker_lib"
+path = "src/lib.rs"
+
+[dependencies]
+eframe = { version = "0.27", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+egui = "0.27"
+enigo = "0.3"
+tokio = { version = "1.0", features = ["full"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
