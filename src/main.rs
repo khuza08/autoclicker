@@ -2,9 +2,14 @@ use autoclicker_lib::{AutoClicker, ClickType};
 use eframe::egui;
 use std::env;
 use std::io::{self, Write};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread;
 use std::time::Duration;
-use crossterm::event::{self, Event, KeyCode, KeyEvent};
+use crossterm::event::{self, Event as CrossEvent, KeyCode, KeyEvent};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+use rdev::{listen, Event as REvent, Key};
+
+const TOGGLE_KEY: Key = Key::F6;
 
 #[derive(Default)]
 struct AutoClickerApp {
@@ -13,10 +18,45 @@ struct AutoClickerApp {
     is_running: bool,
     autoclicker: Option<AutoClicker>,
     error_message: Option<String>,
+    toggle_rx: Option<Receiver<()>>,
+}
+
+impl AutoClickerApp {
+    fn toggle_autoclicker(&mut self) {
+        if self.is_running {
+            // Stop the autoclicker
+            if let Some(ref mut autoclicker) = self.autoclicker {
+                autoclicker.stop();
+            }
+            self.is_running = false;
+            self.error_message = None;
+        } else {
+            // Start the autoclicker
+            let mut ac = AutoClicker::new(self.delay_ms, self.click_type.clone());
+            match ac.start() {
+                Ok(_) => {
+                    self.autoclicker = Some(ac);
+                    self.is_running = true;
+                    self.error_message = None;
+                }
+                Err(e) => {
+                    self.error_message = Some(e);
+                    self.is_running = false;
+                }
+            }
+        }
+    }
 }
 
 impl eframe::App for AutoClickerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Check for global hotkey toggle
+        if let Some(ref rx) = self.toggle_rx {
+            if rx.try_recv().is_ok() {
+                self.toggle_autoclicker();
+            }
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("AutoClicker");
 
@@ -47,28 +87,7 @@ impl eframe::App for AutoClickerApp {
                     .button(if self.is_running { "Stop" } else { "Start" })
                     .clicked()
                 {
-                    if self.is_running {
-                        // Stop the autoclicker
-                        if let Some(ref mut autoclicker) = self.autoclicker {
-                            autoclicker.stop();
-                        }
-                        self.is_running = false;
-                        self.error_message = None;
-                    } else {
-                        // Start the autoclicker
-                        let mut ac = AutoClicker::new(self.delay_ms, self.click_type.clone());
-                        match ac.start() {
-                            Ok(_) => {
-                                self.autoclicker = Some(ac);
-                                self.is_running = true;
-                                self.error_message = None;
-                            }
-                            Err(e) => {
-                                self.error_message = Some(e);
-                                self.is_running = false;
-                            }
-                        }
-                    }
+                    self.toggle_autoclicker();
                 }
 
                 if ui.button("Quit").clicked() {
@@ -87,6 +106,8 @@ impl eframe::App for AutoClickerApp {
                 }
             ));
 
+            ui.label(format!("Global Hotkey: {:?}", TOGGLE_KEY));
+
             if self.is_running {
                 ui.colored_label(egui::Color32::RED, "AUTOCLICKER IS ACTIVE - BE CAREFUL!");
                 // Only request repaint if running to show the active status
@@ -100,7 +121,21 @@ impl eframe::App for AutoClickerApp {
     }
 }
 
-fn run_cli() -> io::Result<()> {
+fn start_hotkey_listener(tx: Sender<()>) {
+    thread::spawn(move || {
+        if let Err(error) = listen(move |event: REvent| {
+            if let rdev::EventType::KeyPress(key) = event.event_type {
+                if key == TOGGLE_KEY {
+                    let _ = tx.send(());
+                }
+            }
+        }) {
+            eprintln!("Global hotkey listener error: {:?}", error);
+        }
+    });
+}
+
+fn run_cli(toggle_rx: Receiver<()>) -> io::Result<()> {
     println!("AutoClicker CLI Mode");
     println!("-------------------");
     println!("Controls:");
@@ -109,6 +144,7 @@ fn run_cli() -> io::Result<()> {
     println!("  q - Quit");
     println!("  + - Increase delay (100ms)");
     println!("  - - Decrease delay (100ms)");
+    println!("  {:?} - Global Toggle", TOGGLE_KEY);
     println!("-------------------");
 
     let mut delay_ms = 1000;
@@ -120,8 +156,31 @@ fn run_cli() -> io::Result<()> {
     let mut stdout = io::stdout();
 
     loop {
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(KeyEvent { code, .. }) = event::read()? {
+        // Check global toggle
+        if toggle_rx.try_recv().is_ok() {
+            if is_running {
+                if let Some(ref mut ac) = autoclicker {
+                    ac.stop();
+                }
+                is_running = false;
+                println!("\r\n[HOTKEY] STOPPED");
+            } else {
+                let mut ac = AutoClicker::new(delay_ms, click_type.clone());
+                match ac.start() {
+                    Ok(_) => {
+                        autoclicker = Some(ac);
+                        is_running = true;
+                        println!("\r\n[HOTKEY] STARTED Delay: {}ms", delay_ms);
+                    }
+                    Err(e) => {
+                        println!("\r\n[ERROR] {}", e);
+                    }
+                }
+            }
+        }
+
+        if event::poll(Duration::from_millis(50))? {
+            if let CrossEvent::Key(KeyEvent { code, .. }) = event::read()? {
                 match code {
                     KeyCode::Char('q') => break,
                     KeyCode::Char('s') => {
@@ -179,8 +238,12 @@ fn run_cli() -> io::Result<()> {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     
+    // Set up hotkey channel
+    let (tx, rx) = mpsc::channel();
+    start_hotkey_listener(tx);
+
     if args.iter().any(|arg| arg == "--cli") {
-        run_cli()?;
+        run_cli(rx)?;
         return Ok(());
     }
 
@@ -195,6 +258,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     eframe::run_native(
         "AutoClicker",
         options,
-        Box::new(|_cc| Box::new(AutoClickerApp::default())),
+        Box::new(|_cc| {
+            let mut app = AutoClickerApp::default();
+            app.toggle_rx = Some(rx);
+            Box::new(app)
+        }),
     ).map_err(|e| e.into())
 }
