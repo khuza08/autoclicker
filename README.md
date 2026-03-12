@@ -1,10 +1,10 @@
-# Rust AutoClicker for Linux
+# Rust AutoClicker
 
-A simple autoclicker application built with Rust for Linux systems.
+A simple and robust autoclicker application built with Rust. Supports both a modern GUI and a lightweight CLI.
 
 ## Prerequisites
 
-Before building and running this application, you need to install the following system dependencies:
+Before building and running this application, you need to install the following system dependencies (required by `enigo` and `egui`):
 
 ### On Arch-based distributions (Arch, Manjaro, CachyOS):
 ```bash
@@ -31,25 +31,33 @@ cargo build --release
 
 ## Running
 
-To run the application in development mode:
-
+### GUI Mode (Default)
+To run the graphical interface:
 ```bash
 cargo run
 ```
 
+### CLI Mode
+To run in the terminal:
+```bash
+cargo run -- --cli
+```
+
 ## Features
 
-- Configurable click interval
-- Support for left, right, and middle mouse buttons
-- Start/stop functionality
-- Command-line interface
+- **Dual Modes**: Modern GUI or lightweight CLI.
+- **Configurable Interval**: Adjust delay from 10ms to 5000ms.
+- **Click Types**: Support for left, right, and middle mouse buttons.
+- **Robust Error Handling**: Gracefully handles mouse initialization failures.
+- **Optimized Performance**: Low CPU usage through intelligent repainting.
 
-## Usage
-
-The application provides a command-line interface:
-- Press `s` to start autoclicking
-- Press `t` to stop autoclicking
-- Press `q` to quit the application
+## CLI Usage
+When running in `--cli` mode:
+- `s`: Start autoclicking
+- `t`: Stop autoclicking
+- `+`: Increase delay (by 100ms)
+- `-`: Decrease delay (by 100ms)
+- `q`: Quit the application
 
 ## License
 

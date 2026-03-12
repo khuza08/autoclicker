@@ -1,3 +1,4 @@
+use enigo::{Button, Direction, Enigo, Mouse, Settings};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -10,8 +11,7 @@ pub enum ClickType {
     Middle,
 }
 
-// Mock AutoClicker implementation for demonstration purposes
-// In a real implementation, this would use enigo for actual mouse clicks
+// Core AutoClicker implementation using the enigo crate.
 pub struct AutoClicker {
     pub delay_ms: u64,
     pub click_type: ClickType,
@@ -29,7 +29,9 @@ impl AutoClicker {
         }
     }
 
-    pub fn start(&mut self) {
+    /// Starts the autoclicker thread.
+    /// Returns an error if the enigo instance fails to initialize.
+    pub fn start(&mut self) -> Result<(), String> {
         // Stop any existing autoclicker
         self.stop();
 
@@ -40,8 +42,20 @@ impl AutoClicker {
         let (stop_tx, stop_rx) = mpsc::channel();
         self.stop_tx = Some(stop_tx);
 
+        // Pre-check enigo initialization to catch errors early
+        if let Err(e) = Enigo::new(&Settings::default()) {
+            return Err(format!("Failed to initialize Enigo: {}", e));
+        }
+
         self.handle = Some(thread::spawn(move || {
-            let mut enigo = Enigo::new(&Settings::default()).unwrap();
+            let mut enigo = match Enigo::new(&Settings::default()) {
+                Ok(e) => e,
+                Err(e) => {
+                    eprintln!("AutoClicker thread failed to initialize Enigo: {}", e);
+                    return;
+                }
+            };
+
             println!(
                 "AutoClicker started with delay {}ms, click type {:?}",
                 delay.as_millis(),
@@ -56,15 +70,22 @@ impl AutoClicker {
                 }
 
                 // Perform the actual mouse click
-                match click_type {
-                    ClickType::Left => enigo.button(Button::Left, Direction::Click).unwrap(),
-                    ClickType::Right => enigo.button(Button::Right, Direction::Click).unwrap(),
-                    ClickType::Middle => enigo.button(Button::Middle, Direction::Click).unwrap(),
+                let result = match click_type {
+                    ClickType::Left => enigo.button(Button::Left, Direction::Click),
+                    ClickType::Right => enigo.button(Button::Right, Direction::Click),
+                    ClickType::Middle => enigo.button(Button::Middle, Direction::Click),
+                };
+
+                if let Err(e) = result {
+                    eprintln!("AutoClicker failed to click: {}", e);
+                    break;
                 }
 
                 thread::sleep(delay);
             }
         }));
+
+        Ok(())
     }
 
     pub fn stop(&mut self) {
